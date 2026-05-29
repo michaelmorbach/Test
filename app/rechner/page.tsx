@@ -52,10 +52,26 @@ function RechnerInner() {
 
   // Einheiten-Positionen
   const [positionen, setPositionen] = useState<EinheitPosition[]>(() => {
+    // Einzelne einheitId (von Katalog-Detail)
     const einheitId = sp.get('einheitId');
-    const e = einheitId ? einheiten.find(x => x.id === einheitId) : null;
-    if (e) return [{ einheitId: e.id, kaufpreis: e.kaufpreis, kaltmiete: e.kaltmiete, eigenkapital: kunde?.eigenkapital ?? 60000, baujahr: 2025 }];
-    return [];
+    // Mehrere einheitIds (von Opportunity)
+    const einheitIdsRaw = sp.get('einheitIds');
+    const idsToLoad = einheitIdsRaw
+      ? einheitIdsRaw.split(',').filter(Boolean)
+      : einheitId ? [einheitId] : [];
+
+    return idsToLoad
+      .map(id => einheiten.find(x => x.id === id))
+      .filter((e): e is NonNullable<typeof e> => e != null)
+      .map(e => ({
+        einheitId: e.id,
+        kaufpreis: e.kaufpreis,
+        kaltmiete: e.kaltmiete,
+        eigenkapital: kunde?.eigenkapital
+          ? Math.round(kunde.eigenkapital / idsToLoad.length)
+          : 60000,
+        baujahr: 2025,
+      }));
   });
 
   // Einheit-Auswahl State
