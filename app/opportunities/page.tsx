@@ -14,9 +14,10 @@ export default function OpportunitiesPage() {
     <div className="min-h-full">
       <Header
         title="Opportunities"
+        subtitle={`${aktive.length} aktiv · ${formatCurrency(aktive.reduce((s, o) => s + o.gesamtwert, 0))} Pipeline`}
         actions={
           <button className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors">
-            <Plus size={15} /> Neue Opportunity
+            <Plus size={15} /> <span className="hidden sm:inline">Neue Opportunity</span>
           </button>
         }
       />

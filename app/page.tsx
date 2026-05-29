@@ -21,7 +21,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-full">
-      <Header title="Cockpit" />
+      <Header title="Cockpit" subtitle="Willkommen zurück, Alex" />
       <div className="p-4 lg:p-6 space-y-6">
 
         {ablaufendeReservierungen.length > 0 && (
