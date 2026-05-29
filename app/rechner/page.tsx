@@ -4,7 +4,8 @@ import { useSearchParams } from 'next/navigation';
 import Header from '@/components/layout/Header';
 import { einheiten, projekte, kunden } from '@/lib/data';
 import { formatCurrency } from '@/lib/utils';
-import { Calculator, Plus, Trash2, ChevronLeft, User } from 'lucide-react';
+import { grenzsteuersatz, durchschnittssteuersatz, einkommensteuer } from '@/lib/tax';
+import { Calculator, Plus, Trash2, ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 
 interface EinheitPosition {
@@ -36,11 +37,18 @@ function RechnerInner() {
   const kundeId = sp.get('kundeId');
   const kunde = kundeId ? kunden.find(k => k.id === kundeId) : null;
 
-  // Kundendaten (editierbar)
-  const [steuersatz, setSteuersatz] = useState(kunde?.steuersatz ?? 42);
+  // Anleger-Profil (editierbar) – Steuersatz wird daraus automatisch berechnet
+  const [einkommen, setEinkommen] = useState(kunde?.einkommen ?? 85000);
+  const [verheiratet, setVerheiratet] = useState(kunde?.familienstand === 'verheiratet');
   const [zinssatz, setZinssatz] = useState(3.8);
   const [tilgung, setTilgung] = useState(2.0);
   const [werbungskosten, setWerbungskosten] = useState(200);
+
+  // Grenzsteuersatz aus Einkommen + Familienstand (mit Splitting)
+  const grenzsatz = grenzsteuersatz(einkommen, verheiratet); // 0…0,45
+  const steuersatz = grenzsatz * 100; // Prozent für die Berechnung unten
+  const durchschnitt = durchschnittssteuersatz(einkommen, verheiratet) * 100;
+  const estJahr = einkommensteuer(einkommen, verheiratet);
 
   // Einheiten-Positionen
   const [positionen, setPositionen] = useState<EinheitPosition[]>(() => {
@@ -108,35 +116,53 @@ function RechnerInner() {
 
           {/* Linke Spalte: Parameter */}
           <div className="space-y-4">
-            {/* Kundenprofil */}
-            {kunde && (
-              <div className="bg-white border border-slate-200 rounded-xl p-5">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-violet-500 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0">
-                    {kunde.vorname[0]}{kunde.nachname[0]}
-                  </div>
-                  <div>
-                    <p className="font-semibold text-slate-800 text-sm">{kunde.vorname} {kunde.nachname}</p>
-                    <p className="text-xs text-slate-500">{kunde.segment === 'kapitalanleger' ? 'Kapitalanleger' : 'Eigennutzer'}</p>
-                  </div>
-                </div>
-                <div className="space-y-1 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Jahreseinkommen</span>
-                    <span className="font-medium text-slate-700">{formatCurrency(kunde.einkommen)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Eigenkapital (gesamt)</span>
-                    <span className="font-medium text-slate-700">{formatCurrency(kunde.eigenkapital)}</span>
+            {/* Anleger-Profil */}
+            <div className="bg-white border border-slate-200 rounded-xl p-5">
+              <div className="flex items-center gap-3 mb-4">
+                {kunde ? (
+                  <>
+                    <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-violet-500 rounded-full flex items-center justify-center text-white font-bold text-sm shrink-0">
+                      {kunde.vorname[0]}{kunde.nachname[0]}
+                    </div>
+                    <div>
+                      <p className="font-semibold text-slate-800 text-sm">{kunde.vorname} {kunde.nachname}</p>
+                      <p className="text-xs text-slate-500">{kunde.segment === 'kapitalanleger' ? 'Kapitalanleger' : 'Eigennutzer'}</p>
+                    </div>
+                  </>
+                ) : (
+                  <h3 className="font-semibold text-slate-700">Anleger-Profil</h3>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <NumberField label="Zu versteuerndes Einkommen / Jahr (€)" value={einkommen} onChange={setEinkommen} />
+
+                <div>
+                  <label className="text-xs text-slate-500 block mb-1">Familienstand (Splitting)</label>
+                  <div className="flex gap-2">
+                    <button onClick={() => setVerheiratet(false)}
+                      className={`flex-1 text-sm rounded-lg px-3 py-2 font-medium transition-colors ${!verheiratet ? 'bg-blue-600 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                      Ledig
+                    </button>
+                    <button onClick={() => setVerheiratet(true)}
+                      className={`flex-1 text-sm rounded-lg px-3 py-2 font-medium transition-colors ${verheiratet ? 'bg-blue-600 text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                      Verheiratet
+                    </button>
                   </div>
                 </div>
               </div>
-            )}
 
-            {/* Steuer */}
-            <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <h3 className="font-semibold text-slate-700 mb-4">Steuer</h3>
-              <SliderInput label="Steuersatz (%)" value={steuersatz} onChange={setSteuersatz} min={14} max={45} step={1} />
+              {/* Automatisch berechneter Steuersatz */}
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <div className="flex items-end justify-between">
+                  <span className="text-xs text-slate-500">Grenzsteuersatz<br /><span className="text-slate-400">(automatisch aus Einkommen)</span></span>
+                  <span className="text-2xl font-bold text-blue-600">{steuersatz.toFixed(1)} %</span>
+                </div>
+                <div className="flex justify-between text-xs text-slate-400 mt-2">
+                  <span>Einkommensteuer: {formatCurrency(estJahr)}/Jahr</span>
+                  <span>Ø {durchschnitt.toFixed(1)} %</span>
+                </div>
+              </div>
             </div>
 
             {/* Finanzierung (gilt für alle Einheiten) */}
@@ -248,7 +274,7 @@ function RechnerInner() {
                   <GesamtKPI label="Liquidität/Monat gesamt" value={`${totalLiquiditaet >= 0 ? '+' : ''}${formatCurrency(totalLiquiditaet)}`} highlight={totalLiquiditaet >= 0} />
                 </div>
                 <p className="text-slate-400 text-xs">
-                  Kombinierter steuerlicher {totalSteuerUeberschuss < 0 ? 'Verlust' : 'Überschuss'}: {formatCurrency(totalSteuerUeberschuss)}/Jahr · Steuersatz: {steuersatz} %
+                  Kombinierter steuerlicher {totalSteuerUeberschuss < 0 ? 'Verlust' : 'Überschuss'}: {formatCurrency(totalSteuerUeberschuss)}/Jahr · Grenzsteuersatz: {steuersatz.toFixed(1)} %
                 </p>
                 <button className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl transition-colors text-sm flex items-center justify-center gap-2">
                   <Calculator size={15} />
