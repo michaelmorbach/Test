@@ -5,7 +5,7 @@ import { CreateUserForm, ToggleActiveButton, UserRoleForm } from './forms';
 
 export default async function TeamPage() {
   await requireAdmin();
-  const users = listUsers();
+  const users = await listUsers();
 
   return (
     <div className="min-h-full">

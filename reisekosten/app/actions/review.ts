@@ -8,7 +8,7 @@ import type { ActionState } from '@/app/actions/trips';
 
 export async function takeForReviewAction(tripId: string): Promise<void> {
   const user = await requireApprover();
-  takeTripForReview(tripId, user.id);
+  await takeTripForReview(tripId, user.id);
   revalidatePath('/freigaben');
   revalidatePath(`/reisekosten/${tripId}`);
 }
@@ -20,7 +20,7 @@ export async function approveTripAction(
 ): Promise<ActionState> {
   const user = await requireApprover();
   const comment = String(formData.get('comment') ?? '').trim();
-  const success = approveTrip(tripId, user.id, comment || undefined);
+  const success = await approveTrip(tripId, user.id, comment || undefined);
   if (!success) {
     return { error: 'Diese Reise befindet sich nicht (mehr) bei dir in Prüfung.' };
   }
@@ -43,7 +43,7 @@ export async function returnTripAction(
   if (!validated.success) {
     return { error: validated.error.issues[0]?.message ?? 'Bitte einen Kommentar angeben.' };
   }
-  const success = returnTrip(tripId, user.id, validated.data.comment);
+  const success = await returnTrip(tripId, user.id, validated.data.comment);
   if (!success) {
     return { error: 'Diese Reise befindet sich nicht (mehr) bei dir in Prüfung.' };
   }

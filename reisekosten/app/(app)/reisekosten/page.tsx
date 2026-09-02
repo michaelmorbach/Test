@@ -8,7 +8,10 @@ import { statusConfig } from '@/lib/statusConfig';
 
 export default async function ReisekostenPage() {
   const user = await requireUser();
-  const trips = listTripsForEmployee(user.id);
+  const trips = await listTripsForEmployee(user.id);
+  const totals = new Map(
+    await Promise.all(trips.map(async (trip) => [trip.id, await tripReimbursementTotalCents(trip.id)] as const))
+  );
 
   return (
     <div className="min-h-full">
@@ -33,7 +36,7 @@ export default async function ReisekostenPage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {trips.map((trip) => {
               const status = statusConfig[trip.status];
-              const total = tripReimbursementTotalCents(trip.id);
+              const total = totals.get(trip.id) ?? 0;
               return (
                 <Link
                   key={trip.id}

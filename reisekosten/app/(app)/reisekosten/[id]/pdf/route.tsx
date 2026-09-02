@@ -30,7 +30,7 @@ const styles = StyleSheet.create({
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  const trip = getTripWithDetails(id);
+  const trip = await getTripWithDetails(id);
   if (!trip) {
     return NextResponse.json({ error: 'Nicht gefunden.' }, { status: 404 });
   }

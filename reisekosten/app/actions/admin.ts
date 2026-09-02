@@ -25,12 +25,12 @@ export async function createUserAction(_state: ActionState, formData: FormData):
   if (!validated.success) {
     return { error: validated.error.issues[0]?.message ?? 'Bitte alle Felder prüfen.' };
   }
-  if (findUserByEmail(validated.data.email)) {
+  if (await findUserByEmail(validated.data.email)) {
     return { error: 'Diese E-Mail-Adresse ist bereits vergeben.' };
   }
 
   const passwordHash = await bcrypt.hash(validated.data.password, 10);
-  createUser({
+  await createUser({
     name: validated.data.name,
     email: validated.data.email,
     passwordHash,
@@ -43,7 +43,7 @@ export async function createUserAction(_state: ActionState, formData: FormData):
 
 export async function setUserRolesAction(userId: string, formData: FormData): Promise<void> {
   await requireAdmin();
-  setUserRoles(userId, {
+  await setUserRoles(userId, {
     isApprover: formData.get('isApprover') === 'on',
     isAdmin: formData.get('isAdmin') === 'on',
   });
@@ -52,7 +52,7 @@ export async function setUserRolesAction(userId: string, formData: FormData): Pr
 
 export async function setUserActiveAction(userId: string, active: boolean): Promise<void> {
   await requireAdmin();
-  setUserActive(userId, active);
+  await setUserActive(userId, active);
   revalidatePath('/admin/team');
 }
 
@@ -77,7 +77,7 @@ export async function createVehicleTypeAction(
   if (satzProKmCent === null || satzProKmCent <= 0) {
     return { error: 'Bitte einen gültigen Satz angeben (z. B. 0,30).' };
   }
-  createVehicleType({ name: validated.data.name, satzProKmCent });
+  await createVehicleType({ name: validated.data.name, satzProKmCent });
   revalidatePath('/admin/kilometersaetze');
   return {};
 }
@@ -99,13 +99,13 @@ export async function updateVehicleTypeAction(
   if (satzProKmCent === null || satzProKmCent <= 0) {
     return { error: 'Bitte einen gültigen Satz angeben (z. B. 0,30).' };
   }
-  updateVehicleType(vehicleTypeId, { name: validated.data.name, satzProKmCent });
+  await updateVehicleType(vehicleTypeId, { name: validated.data.name, satzProKmCent });
   revalidatePath('/admin/kilometersaetze');
   return {};
 }
 
 export async function setVehicleTypeActiveAction(vehicleTypeId: string, aktiv: boolean): Promise<void> {
   await requireAdmin();
-  setVehicleTypeActive(vehicleTypeId, aktiv);
+  await setVehicleTypeActive(vehicleTypeId, aktiv);
   revalidatePath('/admin/kilometersaetze');
 }

@@ -5,11 +5,11 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { requireUser } from '@/lib/dal';
 import { parseEuroToCents, parseGermanDecimal } from '@/lib/money';
-import { deleteUploadedFile, saveReceiptFile } from '@/lib/uploads';
 import { findVehicleTypeById } from '@/lib/repo/vehicleTypes';
 import {
   addMileageEntry,
   addReceipt,
+  attachReceiptFile,
   createTrip,
   deleteMileageEntry,
   deleteReceipt,
@@ -18,7 +18,6 @@ import {
   getTripById,
   submitTrip,
   tripLineItemCount,
-  updateReceiptFile,
   updateTripDetails,
 } from '@/lib/repo/trips';
 
@@ -52,7 +51,7 @@ export async function createTripAction(_state: ActionState, formData: FormData):
     return { error: validated.error.issues[0]?.message ?? 'Bitte alle Felder prüfen.' };
   }
 
-  const trip = createTrip(user.id, validated.data);
+  const trip = await createTrip(user.id, validated.data);
   revalidatePath('/reisekosten');
   redirect(`/reisekosten/${trip.id}`);
 }
@@ -63,7 +62,7 @@ export async function updateTripAction(
   formData: FormData
 ): Promise<ActionState> {
   const user = await requireUser();
-  const trip = getTripById(tripId);
+  const trip = await getTripById(tripId);
   if (!trip || trip.employeeId !== user.id) {
     return { error: 'Reise nicht gefunden.' };
   }
@@ -82,7 +81,7 @@ export async function updateTripAction(
     return { error: validated.error.issues[0]?.message ?? 'Bitte alle Felder prüfen.' };
   }
 
-  updateTripDetails(tripId, validated.data);
+  await updateTripDetails(tripId, validated.data);
   revalidatePath(`/reisekosten/${tripId}`);
   return {};
 }
@@ -102,7 +101,7 @@ export async function addReceiptAction(
   formData: FormData
 ): Promise<ActionState> {
   const user = await requireUser();
-  const trip = getTripById(tripId);
+  const trip = await getTripById(tripId);
   if (!trip || trip.employeeId !== user.id) return { error: 'Reise nicht gefunden.' };
   if (trip.status !== 'ENTWURF' && trip.status !== 'ZURUECKGEGEBEN') {
     return { error: 'Diese Reise kann nicht mehr bearbeitet werden.' };
@@ -125,7 +124,7 @@ export async function addReceiptAction(
     return { error: 'Bitte einen gültigen Betrag angeben.' };
   }
 
-  const receipt = addReceipt(tripId, {
+  const receipt = await addReceipt(tripId, {
     kategorie: validated.data.kategorie,
     haendler: validated.data.haendler,
     betragCent,
@@ -136,8 +135,12 @@ export async function addReceiptAction(
 
   const file = formData.get('beleg');
   if (file instanceof File && file.size > 0) {
-    const { dateiPfad, dateiName } = await saveReceiptFile(tripId, receipt.id, file);
-    updateReceiptFile(receipt.id, dateiPfad, dateiName);
+    const data = Buffer.from(await file.arrayBuffer());
+    await attachReceiptFile(receipt.id, {
+      data,
+      fileName: file.name,
+      contentType: file.type || 'application/octet-stream',
+    });
   }
 
   revalidatePath(`/reisekosten/${tripId}`);
@@ -146,12 +149,11 @@ export async function addReceiptAction(
 
 export async function deleteReceiptAction(tripId: string, receiptId: string): Promise<void> {
   const user = await requireUser();
-  const trip = getTripById(tripId);
-  const receipt = findReceiptById(receiptId);
+  const trip = await getTripById(tripId);
+  const receipt = await findReceiptById(receiptId);
   if (!trip || !receipt || trip.employeeId !== user.id || receipt.tripId !== tripId) return;
   if (trip.status !== 'ENTWURF' && trip.status !== 'ZURUECKGEGEBEN') return;
-  if (receipt.dateiPfad) await deleteUploadedFile(receipt.dateiPfad);
-  deleteReceipt(receiptId);
+  await deleteReceipt(receiptId);
   revalidatePath(`/reisekosten/${tripId}`);
 }
 
@@ -170,7 +172,7 @@ export async function addMileageEntryAction(
   formData: FormData
 ): Promise<ActionState> {
   const user = await requireUser();
-  const trip = getTripById(tripId);
+  const trip = await getTripById(tripId);
   if (!trip || trip.employeeId !== user.id) return { error: 'Reise nicht gefunden.' };
   if (trip.status !== 'ENTWURF' && trip.status !== 'ZURUECKGEGEBEN') {
     return { error: 'Diese Reise kann nicht mehr bearbeitet werden.' };
@@ -188,7 +190,7 @@ export async function addMileageEntryAction(
     return { error: validated.error.issues[0]?.message ?? 'Bitte alle Felder prüfen.' };
   }
 
-  const vehicleType = findVehicleTypeById(validated.data.vehicleTypeId);
+  const vehicleType = await findVehicleTypeById(validated.data.vehicleTypeId);
   if (!vehicleType || !vehicleType.aktiv) {
     return { error: 'Bitte eine gültige Fahrzeugart wählen.' };
   }
@@ -198,7 +200,7 @@ export async function addMileageEntryAction(
     return { error: 'Bitte eine gültige Kilometerzahl angeben.' };
   }
 
-  addMileageEntry(tripId, {
+  await addMileageEntry(tripId, {
     start: validated.data.start,
     ziel: validated.data.ziel,
     datum: validated.data.datum,
@@ -212,23 +214,23 @@ export async function addMileageEntryAction(
 
 export async function deleteMileageEntryAction(tripId: string, entryId: string): Promise<void> {
   const user = await requireUser();
-  const trip = getTripById(tripId);
-  const entry = findMileageEntryById(entryId);
+  const trip = await getTripById(tripId);
+  const entry = await findMileageEntryById(entryId);
   if (!trip || !entry || trip.employeeId !== user.id || entry.tripId !== tripId) return;
   if (trip.status !== 'ENTWURF' && trip.status !== 'ZURUECKGEGEBEN') return;
-  deleteMileageEntry(entryId);
+  await deleteMileageEntry(entryId);
   revalidatePath(`/reisekosten/${tripId}`);
 }
 
 export async function submitTripAction(tripId: string): Promise<ActionState> {
   const user = await requireUser();
-  const trip = getTripById(tripId);
+  const trip = await getTripById(tripId);
   if (!trip || trip.employeeId !== user.id) return { error: 'Reise nicht gefunden.' };
-  if (tripLineItemCount(tripId) === 0) {
+  if ((await tripLineItemCount(tripId)) === 0) {
     return { error: 'Bitte mindestens einen Beleg oder Kilometereintrag hinzufügen, bevor du einreichst.' };
   }
 
-  const success = submitTrip(tripId, user.id);
+  const success = await submitTrip(tripId, user.id);
   if (!success) {
     return { error: 'Diese Reise kann in ihrem aktuellen Status nicht eingereicht werden.' };
   }

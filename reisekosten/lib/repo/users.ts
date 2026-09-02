@@ -1,4 +1,4 @@
-import { db, newId } from '@/lib/db';
+import { newId, nowIso, query, queryOne } from '@/lib/db';
 import type { PublicUser, User } from '@/lib/types';
 
 interface UserRow {
@@ -6,9 +6,9 @@ interface UserRow {
   name: string;
   email: string;
   password_hash: string;
-  is_approver: number;
-  is_admin: number;
-  active: number;
+  is_approver: boolean;
+  is_admin: boolean;
+  active: boolean;
   created_at: string;
 }
 
@@ -18,9 +18,9 @@ function mapUser(row: UserRow): User {
     name: row.name,
     email: row.email,
     passwordHash: row.password_hash,
-    isApprover: !!row.is_approver,
-    isAdmin: !!row.is_admin,
-    active: !!row.active,
+    isApprover: row.is_approver,
+    isAdmin: row.is_admin,
+    active: row.active,
     createdAt: row.created_at,
   };
 }
@@ -37,53 +37,58 @@ export function toPublicUser(user: User): PublicUser {
   };
 }
 
-export function findUserByEmail(email: string): User | null {
-  const row = db
-    .prepare('SELECT * FROM users WHERE email = ?')
-    .get(email.trim().toLowerCase()) as UserRow | undefined;
+export async function findUserByEmail(email: string): Promise<User | null> {
+  const row = await queryOne<UserRow>('SELECT * FROM users WHERE email = $1', [
+    email.trim().toLowerCase(),
+  ]);
   return row ? mapUser(row) : null;
 }
 
-export function findUserById(id: string): User | null {
-  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
+export async function findUserById(id: string): Promise<User | null> {
+  const row = await queryOne<UserRow>('SELECT * FROM users WHERE id = $1', [id]);
   return row ? mapUser(row) : null;
 }
 
-export function listUsers(): User[] {
-  const rows = db.prepare('SELECT * FROM users ORDER BY name').all() as UserRow[];
+export async function listUsers(): Promise<User[]> {
+  const rows = await query<UserRow>('SELECT * FROM users ORDER BY name');
   return rows.map(mapUser);
 }
 
-export function createUser(input: {
+export async function createUser(input: {
   name: string;
   email: string;
   passwordHash: string;
   isApprover: boolean;
   isAdmin: boolean;
-}): User {
+}): Promise<User> {
   const id = newId();
-  db.prepare(
-    `INSERT INTO users (id, name, email, password_hash, is_approver, is_admin, active)
-     VALUES (?, ?, ?, ?, ?, ?, 1)`
-  ).run(
+  await query(
+    `INSERT INTO users (id, name, email, password_hash, is_approver, is_admin, active, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7)`,
+    [
+      id,
+      input.name,
+      input.email.trim().toLowerCase(),
+      input.passwordHash,
+      input.isApprover,
+      input.isAdmin,
+      nowIso(),
+    ]
+  );
+  return (await findUserById(id))!;
+}
+
+export async function setUserRoles(
+  id: string,
+  roles: { isApprover: boolean; isAdmin: boolean }
+): Promise<void> {
+  await query('UPDATE users SET is_approver = $1, is_admin = $2 WHERE id = $3', [
+    roles.isApprover,
+    roles.isAdmin,
     id,
-    input.name,
-    input.email.trim().toLowerCase(),
-    input.passwordHash,
-    input.isApprover ? 1 : 0,
-    input.isAdmin ? 1 : 0
-  );
-  return findUserById(id)!;
+  ]);
 }
 
-export function setUserRoles(id: string, roles: { isApprover: boolean; isAdmin: boolean }): void {
-  db.prepare('UPDATE users SET is_approver = ?, is_admin = ? WHERE id = ?').run(
-    roles.isApprover ? 1 : 0,
-    roles.isAdmin ? 1 : 0,
-    id
-  );
-}
-
-export function setUserActive(id: string, active: boolean): void {
-  db.prepare('UPDATE users SET active = ? WHERE id = ?').run(active ? 1 : 0, id);
+export async function setUserActive(id: string, active: boolean): Promise<void> {
+  await query('UPDATE users SET active = $1 WHERE id = $2', [active, id]);
 }

@@ -53,7 +53,7 @@ export interface Receipt {
   betragCent: number;
   zahlungsart: PaymentMethod;
   belegDatum: string;
-  dateiPfad: string | null;
+  hatDatei: boolean;
   dateiName: string | null;
   notiz: string | null;
   createdAt: string;

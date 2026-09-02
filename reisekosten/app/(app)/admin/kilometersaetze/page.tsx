@@ -5,7 +5,7 @@ import { CreateVehicleTypeForm, EditVehicleTypeForm, ToggleVehicleTypeActiveButt
 
 export default async function KilometersaetzePage() {
   await requireAdmin();
-  const vehicleTypes = listVehicleTypes(true);
+  const vehicleTypes = await listVehicleTypes(true);
 
   return (
     <div className="min-h-full">

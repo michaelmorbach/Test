@@ -1,11 +1,11 @@
-import { db, newId } from '@/lib/db';
+import { newId, query, queryOne } from '@/lib/db';
 import type { VehicleType } from '@/lib/types';
 
 interface VehicleTypeRow {
   id: string;
   name: string;
   rate_per_km_cents: number;
-  active: number;
+  active: boolean;
 }
 
 function mapVehicleType(row: VehicleTypeRow): VehicleType {
@@ -13,45 +13,45 @@ function mapVehicleType(row: VehicleTypeRow): VehicleType {
     id: row.id,
     name: row.name,
     satzProKmCent: row.rate_per_km_cents,
-    aktiv: !!row.active,
+    aktiv: row.active,
   };
 }
 
-export function listVehicleTypes(includeInactive = false): VehicleType[] {
+export async function listVehicleTypes(includeInactive = false): Promise<VehicleType[]> {
   const rows = includeInactive
-    ? (db.prepare('SELECT * FROM vehicle_types ORDER BY name').all() as VehicleTypeRow[])
-    : (db.prepare('SELECT * FROM vehicle_types WHERE active = 1 ORDER BY name').all() as VehicleTypeRow[]);
+    ? await query<VehicleTypeRow>('SELECT * FROM vehicle_types ORDER BY name')
+    : await query<VehicleTypeRow>('SELECT * FROM vehicle_types WHERE active = TRUE ORDER BY name');
   return rows.map(mapVehicleType);
 }
 
-export function findVehicleTypeById(id: string): VehicleType | null {
-  const row = db.prepare('SELECT * FROM vehicle_types WHERE id = ?').get(id) as
-    | VehicleTypeRow
-    | undefined;
+export async function findVehicleTypeById(id: string): Promise<VehicleType | null> {
+  const row = await queryOne<VehicleTypeRow>('SELECT * FROM vehicle_types WHERE id = $1', [id]);
   return row ? mapVehicleType(row) : null;
 }
 
-export function createVehicleType(input: { name: string; satzProKmCent: number }): VehicleType {
+export async function createVehicleType(input: {
+  name: string;
+  satzProKmCent: number;
+}): Promise<VehicleType> {
   const id = newId();
-  db.prepare('INSERT INTO vehicle_types (id, name, rate_per_km_cents, active) VALUES (?, ?, ?, 1)').run(
-    id,
-    input.name,
-    input.satzProKmCent
+  await query(
+    'INSERT INTO vehicle_types (id, name, rate_per_km_cents, active) VALUES ($1, $2, $3, TRUE)',
+    [id, input.name, input.satzProKmCent]
   );
-  return findVehicleTypeById(id)!;
+  return (await findVehicleTypeById(id))!;
 }
 
-export function updateVehicleType(
+export async function updateVehicleType(
   id: string,
   input: { name: string; satzProKmCent: number }
-): void {
-  db.prepare('UPDATE vehicle_types SET name = ?, rate_per_km_cents = ? WHERE id = ?').run(
+): Promise<void> {
+  await query('UPDATE vehicle_types SET name = $1, rate_per_km_cents = $2 WHERE id = $3', [
     input.name,
     input.satzProKmCent,
-    id
-  );
+    id,
+  ]);
 }
 
-export function setVehicleTypeActive(id: string, aktiv: boolean): void {
-  db.prepare('UPDATE vehicle_types SET active = ? WHERE id = ?').run(aktiv ? 1 : 0, id);
+export async function setVehicleTypeActive(id: string, aktiv: boolean): Promise<void> {
+  await query('UPDATE vehicle_types SET active = $1 WHERE id = $2', [aktiv, id]);
 }

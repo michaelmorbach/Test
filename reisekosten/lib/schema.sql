@@ -1,21 +1,23 @@
--- RVI Reisekosten – Datenbankschema (SQLite via better-sqlite3)
+-- RVI Reisekosten – Datenbankschema (PostgreSQL)
+-- Alle Zeitstempel/Datumsfelder werden als ISO-8601-Text applikationsseitig gesetzt,
+-- damit das Format unabhängig vom DB-Server konsistent bleibt.
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
-  is_approver INTEGER NOT NULL DEFAULT 0,
-  is_admin INTEGER NOT NULL DEFAULT 0,
-  active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  is_approver BOOLEAN NOT NULL DEFAULT FALSE,
+  is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS vehicle_types (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   rate_per_km_cents INTEGER NOT NULL,
-  active INTEGER NOT NULL DEFAULT 1
+  active BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 CREATE TABLE IF NOT EXISTS trips (
@@ -31,8 +33,8 @@ CREATE TABLE IF NOT EXISTS trips (
   reviewer_id TEXT REFERENCES users(id),
   submitted_at TEXT,
   decided_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS receipts (
@@ -43,10 +45,11 @@ CREATE TABLE IF NOT EXISTS receipts (
   amount_cents INTEGER NOT NULL,
   payment_method TEXT NOT NULL CHECK (payment_method IN ('PRIVAT','FIRMENKARTE','BAR')),
   receipt_date TEXT NOT NULL,
-  file_path TEXT,
+  file_data BYTEA,
   file_name TEXT,
+  file_content_type TEXT,
   note TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS mileage_entries (
@@ -57,9 +60,9 @@ CREATE TABLE IF NOT EXISTS mileage_entries (
   entry_date TEXT NOT NULL,
   reason TEXT NOT NULL,
   vehicle_type_id TEXT NOT NULL REFERENCES vehicle_types(id),
-  kilometers REAL NOT NULL,
+  kilometers DOUBLE PRECISION NOT NULL,
   rate_snapshot_cents INTEGER NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS audit_log_entries (
@@ -69,7 +72,7 @@ CREATE TABLE IF NOT EXISTS audit_log_entries (
   action TEXT NOT NULL
     CHECK (action IN ('ANGELEGT','EINGEREICHT','IN_PRUEFUNG_GENOMMEN','FREIGEGEBEN','ZURUECKGEGEBEN','KOMMENTAR')),
   comment TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_trips_employee ON trips(employee_id);

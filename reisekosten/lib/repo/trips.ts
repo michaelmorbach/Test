@@ -1,4 +1,4 @@
-import { db, newId } from '@/lib/db';
+import { newId, nowIso, query, queryOne, withTransaction, type TxQuery } from '@/lib/db';
 import { findUserById, toPublicUser } from '@/lib/repo/users';
 import { findVehicleTypeById } from '@/lib/repo/vehicleTypes';
 import type {
@@ -37,10 +37,16 @@ interface ReceiptRow {
   amount_cents: number;
   payment_method: PaymentMethod;
   receipt_date: string;
-  file_path: string | null;
   file_name: string | null;
+  file_content_type: string | null;
   note: string | null;
   created_at: string;
+}
+
+interface ReceiptFileRow {
+  file_data: Buffer | null;
+  file_content_type: string | null;
+  file_name: string | null;
 }
 
 interface MileageRow {
@@ -64,6 +70,9 @@ interface AuditRow {
   comment: string | null;
   created_at: string;
 }
+
+const RECEIPT_COLUMNS =
+  'id, trip_id, category, merchant, amount_cents, payment_method, receipt_date, file_name, file_content_type, note, created_at';
 
 function mapTrip(row: TripRow): Trip {
   return {
@@ -92,7 +101,7 @@ function mapReceipt(row: ReceiptRow): Receipt {
     betragCent: row.amount_cents,
     zahlungsart: row.payment_method,
     belegDatum: row.receipt_date,
-    dateiPfad: row.file_path,
+    hatDatei: !!row.file_name,
     dateiName: row.file_name,
     notiz: row.note,
     createdAt: row.created_at,
@@ -125,149 +134,174 @@ function mapAudit(row: AuditRow): AuditLogEntry {
   };
 }
 
-export function getTripById(id: string): Trip | null {
-  const row = db.prepare('SELECT * FROM trips WHERE id = ?').get(id) as TripRow | undefined;
+export async function getTripById(id: string): Promise<Trip | null> {
+  const row = await queryOne<TripRow>('SELECT * FROM trips WHERE id = $1', [id]);
   return row ? mapTrip(row) : null;
 }
 
-export function listTripsForEmployee(employeeId: string): Trip[] {
-  const rows = db
-    .prepare('SELECT * FROM trips WHERE employee_id = ? ORDER BY created_at DESC')
-    .all(employeeId) as TripRow[];
+export async function listTripsForEmployee(employeeId: string): Promise<Trip[]> {
+  const rows = await query<TripRow>(
+    'SELECT * FROM trips WHERE employee_id = $1 ORDER BY created_at DESC',
+    [employeeId]
+  );
   return rows.map(mapTrip);
 }
 
-export function listTripsForReview(): Trip[] {
-  const rows = db
-    .prepare(
-      `SELECT * FROM trips WHERE status IN ('EINGEREICHT', 'IN_PRUEFUNG') ORDER BY submitted_at ASC`
-    )
-    .all() as TripRow[];
+export async function listTripsForReview(): Promise<Trip[]> {
+  const rows = await query<TripRow>(
+    `SELECT * FROM trips WHERE status IN ('EINGEREICHT', 'IN_PRUEFUNG') ORDER BY submitted_at ASC`
+  );
   return rows.map(mapTrip);
 }
 
-export function listReceipts(tripId: string): Receipt[] {
-  const rows = db
-    .prepare('SELECT * FROM receipts WHERE trip_id = ? ORDER BY receipt_date DESC, created_at DESC')
-    .all(tripId) as ReceiptRow[];
+export async function listReceipts(tripId: string): Promise<Receipt[]> {
+  const rows = await query<ReceiptRow>(
+    `SELECT ${RECEIPT_COLUMNS} FROM receipts WHERE trip_id = $1 ORDER BY receipt_date DESC, created_at DESC`,
+    [tripId]
+  );
   return rows.map(mapReceipt);
 }
 
-export function findReceiptById(id: string): Receipt | null {
-  const row = db.prepare('SELECT * FROM receipts WHERE id = ?').get(id) as ReceiptRow | undefined;
+export async function findReceiptById(id: string): Promise<Receipt | null> {
+  const row = await queryOne<ReceiptRow>(`SELECT ${RECEIPT_COLUMNS} FROM receipts WHERE id = $1`, [id]);
   return row ? mapReceipt(row) : null;
 }
 
-export function listMileageEntries(tripId: string): MileageEntry[] {
-  const rows = db
-    .prepare('SELECT * FROM mileage_entries WHERE trip_id = ? ORDER BY entry_date DESC, created_at DESC')
-    .all(tripId) as MileageRow[];
+export async function getReceiptFile(id: string): Promise<
+  { data: Buffer; contentType: string; fileName: string } | null
+> {
+  const row = await queryOne<ReceiptFileRow>(
+    'SELECT file_data, file_content_type, file_name FROM receipts WHERE id = $1',
+    [id]
+  );
+  if (!row || !row.file_data) return null;
+  return {
+    data: row.file_data,
+    contentType: row.file_content_type ?? 'application/octet-stream',
+    fileName: row.file_name ?? 'beleg',
+  };
+}
+
+export async function listMileageEntries(tripId: string): Promise<MileageEntry[]> {
+  const rows = await query<MileageRow>(
+    'SELECT * FROM mileage_entries WHERE trip_id = $1 ORDER BY entry_date DESC, created_at DESC',
+    [tripId]
+  );
   return rows.map(mapMileage);
 }
 
-export function findMileageEntryById(id: string): MileageEntry | null {
-  const row = db.prepare('SELECT * FROM mileage_entries WHERE id = ?').get(id) as
-    | MileageRow
-    | undefined;
+export async function findMileageEntryById(id: string): Promise<MileageEntry | null> {
+  const row = await queryOne<MileageRow>('SELECT * FROM mileage_entries WHERE id = $1', [id]);
   return row ? mapMileage(row) : null;
 }
 
-export function listAuditLog(tripId: string): AuditLogEntry[] {
-  const rows = db
-    .prepare('SELECT * FROM audit_log_entries WHERE trip_id = ? ORDER BY created_at ASC')
-    .all(tripId) as AuditRow[];
+export async function listAuditLog(tripId: string): Promise<AuditLogEntry[]> {
+  const rows = await query<AuditRow>(
+    'SELECT * FROM audit_log_entries WHERE trip_id = $1 ORDER BY created_at ASC',
+    [tripId]
+  );
   return rows.map(mapAudit);
 }
 
-function addAuditEntry(
+async function addAuditEntry(
+  tx: TxQuery,
   tripId: string,
   userId: string,
   action: AuditAction,
   comment?: string | null
-): void {
-  db.prepare(
-    'INSERT INTO audit_log_entries (id, trip_id, user_id, action, comment) VALUES (?, ?, ?, ?, ?)'
-  ).run(newId(), tripId, userId, action, comment ?? null);
+): Promise<void> {
+  await tx(
+    'INSERT INTO audit_log_entries (id, trip_id, user_id, action, comment, created_at) VALUES ($1, $2, $3, $4, $5, $6)',
+    [newId(), tripId, userId, action, comment ?? null, nowIso()]
+  );
 }
 
-export function tripLineItemCount(tripId: string): number {
-  const receiptCount = db
-    .prepare('SELECT COUNT(*) as count FROM receipts WHERE trip_id = ?')
-    .get(tripId) as { count: number };
-  const mileageCount = db
-    .prepare('SELECT COUNT(*) as count FROM mileage_entries WHERE trip_id = ?')
-    .get(tripId) as { count: number };
-  return receiptCount.count + mileageCount.count;
+export async function tripLineItemCount(tripId: string): Promise<number> {
+  const receiptCount = await queryOne<{ count: string }>(
+    'SELECT COUNT(*) as count FROM receipts WHERE trip_id = $1',
+    [tripId]
+  );
+  const mileageCount = await queryOne<{ count: string }>(
+    'SELECT COUNT(*) as count FROM mileage_entries WHERE trip_id = $1',
+    [tripId]
+  );
+  return Number(receiptCount?.count ?? 0) + Number(mileageCount?.count ?? 0);
 }
 
-export function tripReimbursementTotalCents(tripId: string): number {
-  const receiptSum = db
-    .prepare('SELECT COALESCE(SUM(amount_cents), 0) as total FROM receipts WHERE trip_id = ?')
-    .get(tripId) as { total: number };
-  const mileageRows = db
-    .prepare('SELECT kilometers, rate_snapshot_cents FROM mileage_entries WHERE trip_id = ?')
-    .all(tripId) as { kilometers: number; rate_snapshot_cents: number }[];
+export async function tripReimbursementTotalCents(tripId: string): Promise<number> {
+  const receiptSum = await queryOne<{ total: string }>(
+    'SELECT COALESCE(SUM(amount_cents), 0) as total FROM receipts WHERE trip_id = $1',
+    [tripId]
+  );
+  const mileageRows = await query<{ kilometers: number; rate_snapshot_cents: number }>(
+    'SELECT kilometers, rate_snapshot_cents FROM mileage_entries WHERE trip_id = $1',
+    [tripId]
+  );
   const mileageSum = mileageRows.reduce(
     (sum, row) => sum + Math.round(row.kilometers * row.rate_snapshot_cents),
     0
   );
-  return receiptSum.total + mileageSum;
+  return Number(receiptSum?.total ?? 0) + mileageSum;
 }
 
-export function getTripWithDetails(id: string): TripWithDetails | null {
-  const trip = getTripById(id);
+export async function getTripWithDetails(id: string): Promise<TripWithDetails | null> {
+  const trip = await getTripById(id);
   if (!trip) return null;
 
-  const employee = findUserById(trip.employeeId);
+  const employee = await findUserById(trip.employeeId);
   if (!employee) return null;
-  const reviewer = trip.reviewerId ? findUserById(trip.reviewerId) : null;
+  const reviewer = trip.reviewerId ? await findUserById(trip.reviewerId) : null;
 
-  const auditLog = listAuditLog(id).map((entry) => {
-    const user = findUserById(entry.userId);
-    return { ...entry, user: user ? toPublicUser(user) : toPublicUser(employee) };
-  });
+  const rawAuditLog = await listAuditLog(id);
+  const auditLog = await Promise.all(
+    rawAuditLog.map(async (entry) => {
+      const user = await findUserById(entry.userId);
+      return { ...entry, user: user ? toPublicUser(user) : toPublicUser(employee) };
+    })
+  );
 
   return {
     ...trip,
     employee: toPublicUser(employee),
     reviewer: reviewer ? toPublicUser(reviewer) : null,
-    receipts: listReceipts(id),
-    mileageEntries: listMileageEntries(id),
+    receipts: await listReceipts(id),
+    mileageEntries: await listMileageEntries(id),
     auditLog,
-    erstattungGesamtCent: tripReimbursementTotalCents(id),
+    erstattungGesamtCent: await tripReimbursementTotalCents(id),
   };
 }
 
-export function createTrip(
+export async function createTrip(
   employeeId: string,
   input: { zweck: string; ziel: string; kostenstelle: string; vonDatum: string; bisDatum: string }
-): Trip {
+): Promise<Trip> {
   const id = newId();
-  const transaction = db.transaction(() => {
-    db.prepare(
-      `INSERT INTO trips (id, employee_id, purpose, destination, cost_center, start_date, end_date, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'ENTWURF')`
-    ).run(id, employeeId, input.zweck, input.ziel, input.kostenstelle, input.vonDatum, input.bisDatum);
-    addAuditEntry(id, employeeId, 'ANGELEGT');
+  const now = nowIso();
+  await withTransaction(async (tx) => {
+    await tx(
+      `INSERT INTO trips (id, employee_id, purpose, destination, cost_center, start_date, end_date, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'ENTWURF', $8, $8)`,
+      [id, employeeId, input.zweck, input.ziel, input.kostenstelle, input.vonDatum, input.bisDatum, now]
+    );
+    await addAuditEntry(tx, id, employeeId, 'ANGELEGT');
   });
-  transaction();
-  return getTripById(id)!;
+  return (await getTripById(id))!;
 }
 
-export function updateTripDetails(
+export async function updateTripDetails(
   tripId: string,
   input: { zweck: string; ziel: string; kostenstelle: string; vonDatum: string; bisDatum: string }
-): boolean {
-  const result = db
-    .prepare(
-      `UPDATE trips SET purpose = ?, destination = ?, cost_center = ?, start_date = ?, end_date = ?, updated_at = datetime('now')
-       WHERE id = ? AND status IN ('ENTWURF', 'ZURUECKGEGEBEN')`
-    )
-    .run(input.zweck, input.ziel, input.kostenstelle, input.vonDatum, input.bisDatum, tripId);
-  return result.changes > 0;
+): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    `UPDATE trips SET purpose = $1, destination = $2, cost_center = $3, start_date = $4, end_date = $5, updated_at = $6
+     WHERE id = $7 AND status IN ('ENTWURF', 'ZURUECKGEGEBEN')
+     RETURNING id`,
+    [input.zweck, input.ziel, input.kostenstelle, input.vonDatum, input.bisDatum, nowIso(), tripId]
+  );
+  return rows.length > 0;
 }
 
-export function addReceipt(
+export async function addReceipt(
   tripId: string,
   input: {
     kategorie: ReceiptCategory;
@@ -275,40 +309,44 @@ export function addReceipt(
     betragCent: number;
     zahlungsart: PaymentMethod;
     belegDatum: string;
-    dateiPfad?: string | null;
-    dateiName?: string | null;
     notiz?: string | null;
   }
-): Receipt {
+): Promise<Receipt> {
   const id = newId();
-  db.prepare(
-    `INSERT INTO receipts (id, trip_id, category, merchant, amount_cents, payment_method, receipt_date, file_path, file_name, note)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    tripId,
-    input.kategorie,
-    input.haendler,
-    input.betragCent,
-    input.zahlungsart,
-    input.belegDatum,
-    input.dateiPfad ?? null,
-    input.dateiName ?? null,
-    input.notiz ?? null
+  await query(
+    `INSERT INTO receipts (id, trip_id, category, merchant, amount_cents, payment_method, receipt_date, note, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [
+      id,
+      tripId,
+      input.kategorie,
+      input.haendler,
+      input.betragCent,
+      input.zahlungsart,
+      input.belegDatum,
+      input.notiz ?? null,
+      nowIso(),
+    ]
   );
-  db.prepare("UPDATE trips SET updated_at = datetime('now') WHERE id = ?").run(tripId);
-  return findReceiptById(id)!;
+  await query("UPDATE trips SET updated_at = $1 WHERE id = $2", [nowIso(), tripId]);
+  return (await findReceiptById(id))!;
 }
 
-export function deleteReceipt(id: string): void {
-  db.prepare('DELETE FROM receipts WHERE id = ?').run(id);
+export async function attachReceiptFile(
+  id: string,
+  file: { data: Buffer; fileName: string; contentType: string }
+): Promise<void> {
+  await query(
+    'UPDATE receipts SET file_data = $1, file_name = $2, file_content_type = $3 WHERE id = $4',
+    [file.data, file.fileName, file.contentType, id]
+  );
 }
 
-export function updateReceiptFile(id: string, dateiPfad: string, dateiName: string): void {
-  db.prepare('UPDATE receipts SET file_path = ?, file_name = ? WHERE id = ?').run(dateiPfad, dateiName, id);
+export async function deleteReceipt(id: string): Promise<void> {
+  await query('DELETE FROM receipts WHERE id = $1', [id]);
 }
 
-export function addMileageEntry(
+export async function addMileageEntry(
   tripId: string,
   input: {
     start: string;
@@ -318,93 +356,91 @@ export function addMileageEntry(
     vehicleTypeId: string;
     kilometer: number;
   }
-): MileageEntry {
-  const vehicleType = findVehicleTypeById(input.vehicleTypeId);
+): Promise<MileageEntry> {
+  const vehicleType = await findVehicleTypeById(input.vehicleTypeId);
   if (!vehicleType) throw new Error('Unbekannte Fahrzeugart');
 
   const id = newId();
-  db.prepare(
-    `INSERT INTO mileage_entries (id, trip_id, start_location, destination, entry_date, reason, vehicle_type_id, kilometers, rate_snapshot_cents)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id,
-    tripId,
-    input.start,
-    input.ziel,
-    input.datum,
-    input.anlass,
-    input.vehicleTypeId,
-    input.kilometer,
-    vehicleType.satzProKmCent
+  await query(
+    `INSERT INTO mileage_entries (id, trip_id, start_location, destination, entry_date, reason, vehicle_type_id, kilometers, rate_snapshot_cents, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      id,
+      tripId,
+      input.start,
+      input.ziel,
+      input.datum,
+      input.anlass,
+      input.vehicleTypeId,
+      input.kilometer,
+      vehicleType.satzProKmCent,
+      nowIso(),
+    ]
   );
-  db.prepare("UPDATE trips SET updated_at = datetime('now') WHERE id = ?").run(tripId);
-  return findMileageEntryById(id)!;
+  await query('UPDATE trips SET updated_at = $1 WHERE id = $2', [nowIso(), tripId]);
+  return (await findMileageEntryById(id))!;
 }
 
-export function deleteMileageEntry(id: string): void {
-  db.prepare('DELETE FROM mileage_entries WHERE id = ?').run(id);
+export async function deleteMileageEntry(id: string): Promise<void> {
+  await query('DELETE FROM mileage_entries WHERE id = $1', [id]);
 }
 
-export function submitTrip(tripId: string, employeeId: string): boolean {
-  const transaction = db.transaction(() => {
-    const result = db
-      .prepare(
-        `UPDATE trips SET status = 'EINGEREICHT', submitted_at = datetime('now'), reviewer_id = NULL, decided_at = NULL, updated_at = datetime('now')
-         WHERE id = ? AND employee_id = ? AND status IN ('ENTWURF', 'ZURUECKGEGEBEN')`
-      )
-      .run(tripId, employeeId);
-    if (result.changes > 0) {
-      addAuditEntry(tripId, employeeId, 'EINGEREICHT');
+export async function submitTrip(tripId: string, employeeId: string): Promise<boolean> {
+  return withTransaction(async (tx) => {
+    const rows = await tx<{ id: string }>(
+      `UPDATE trips SET status = 'EINGEREICHT', submitted_at = $1, reviewer_id = NULL, decided_at = NULL, updated_at = $1
+       WHERE id = $2 AND employee_id = $3 AND status IN ('ENTWURF', 'ZURUECKGEGEBEN')
+       RETURNING id`,
+      [nowIso(), tripId, employeeId]
+    );
+    if (rows.length > 0) {
+      await addAuditEntry(tx, tripId, employeeId, 'EINGEREICHT');
     }
-    return result.changes > 0;
+    return rows.length > 0;
   });
-  return transaction();
 }
 
-export function takeTripForReview(tripId: string, reviewerId: string): boolean {
-  const transaction = db.transaction(() => {
-    const result = db
-      .prepare(
-        `UPDATE trips SET status = 'IN_PRUEFUNG', reviewer_id = ?, updated_at = datetime('now')
-         WHERE id = ? AND status = 'EINGEREICHT'`
-      )
-      .run(reviewerId, tripId);
-    if (result.changes > 0) {
-      addAuditEntry(tripId, reviewerId, 'IN_PRUEFUNG_GENOMMEN');
+export async function takeTripForReview(tripId: string, reviewerId: string): Promise<boolean> {
+  return withTransaction(async (tx) => {
+    const rows = await tx<{ id: string }>(
+      `UPDATE trips SET status = 'IN_PRUEFUNG', reviewer_id = $1, updated_at = $2
+       WHERE id = $3 AND status = 'EINGEREICHT'
+       RETURNING id`,
+      [reviewerId, nowIso(), tripId]
+    );
+    if (rows.length > 0) {
+      await addAuditEntry(tx, tripId, reviewerId, 'IN_PRUEFUNG_GENOMMEN');
     }
-    return result.changes > 0;
+    return rows.length > 0;
   });
-  return transaction();
 }
 
-export function approveTrip(tripId: string, reviewerId: string, comment?: string): boolean {
-  const transaction = db.transaction(() => {
-    const result = db
-      .prepare(
-        `UPDATE trips SET status = 'FREIGEGEBEN', decided_at = datetime('now'), updated_at = datetime('now')
-         WHERE id = ? AND reviewer_id = ? AND status = 'IN_PRUEFUNG'`
-      )
-      .run(tripId, reviewerId);
-    if (result.changes > 0) {
-      addAuditEntry(tripId, reviewerId, 'FREIGEGEBEN', comment);
+export async function approveTrip(tripId: string, reviewerId: string, comment?: string): Promise<boolean> {
+  return withTransaction(async (tx) => {
+    const rows = await tx<{ id: string }>(
+      `UPDATE trips SET status = 'FREIGEGEBEN', decided_at = $1, updated_at = $1
+       WHERE id = $2 AND reviewer_id = $3 AND status = 'IN_PRUEFUNG'
+       RETURNING id`,
+      [nowIso(), tripId, reviewerId]
+    );
+    if (rows.length > 0) {
+      await addAuditEntry(tx, tripId, reviewerId, 'FREIGEGEBEN', comment);
     }
-    return result.changes > 0;
+    return rows.length > 0;
   });
-  return transaction();
 }
 
-export function returnTrip(tripId: string, reviewerId: string, comment: string): boolean {
-  const transaction = db.transaction(() => {
-    const result = db
-      .prepare(
-        `UPDATE trips SET status = 'ZURUECKGEGEBEN', decided_at = datetime('now'), updated_at = datetime('now')
-         WHERE id = ? AND reviewer_id = ? AND status = 'IN_PRUEFUNG'`
-      )
-      .run(tripId, reviewerId);
-    if (result.changes > 0) {
-      addAuditEntry(tripId, reviewerId, 'ZURUECKGEGEBEN', comment);
+export async function returnTrip(tripId: string, reviewerId: string, comment: string): Promise<boolean> {
+  return withTransaction(async (tx) => {
+    const rows = await tx<{ id: string }>(
+      `UPDATE trips SET status = 'ZURUECKGEGEBEN', decided_at = $1, updated_at = $1
+       WHERE id = $2 AND reviewer_id = $3 AND status = 'IN_PRUEFUNG'
+       RETURNING id`,
+      [nowIso(), tripId, reviewerId]
+    );
+    if (rows.length > 0) {
+      await addAuditEntry(tx, tripId, reviewerId, 'ZURUECKGEGEBEN', comment);
     }
-    return result.changes > 0;
+    return rows.length > 0;
   });
-  return transaction();
 }

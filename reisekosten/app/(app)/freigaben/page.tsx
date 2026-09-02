@@ -8,22 +8,27 @@ import { statusConfig } from '@/lib/statusConfig';
 
 export default async function FreigabenPage() {
   const user = await requireApprover();
-  const trips = listTripsForReview();
+  const trips = await listTripsForReview();
+  const rows = await Promise.all(
+    trips.map(async (trip) => ({
+      trip,
+      employee: await findUserById(trip.employeeId),
+      total: await tripReimbursementTotalCents(trip.id),
+    }))
+  );
 
   return (
     <div className="min-h-full">
       <Header title="Freigaben" />
       <div className="p-4 lg:p-6">
-        {trips.length === 0 ? (
+        {rows.length === 0 ? (
           <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-500">
             Aktuell keine offenen Einreichungen.
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {trips.map((trip) => {
-              const employee = findUserById(trip.employeeId);
+            {rows.map(({ trip, employee, total }) => {
               const status = statusConfig[trip.status];
-              const total = tripReimbursementTotalCents(trip.id);
               const isMine = trip.reviewerId === user.id;
               return (
                 <Link

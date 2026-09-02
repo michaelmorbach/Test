@@ -24,7 +24,7 @@ export async function login(_state: LoginState, formData: FormData): Promise<Log
     return { error: 'Bitte E-Mail und Passwort angeben.' };
   }
 
-  const user = findUserByEmail(validated.data.email);
+  const user = await findUserByEmail(validated.data.email);
   if (!user || !user.active) {
     return { error: 'E-Mail oder Passwort ist falsch.' };
   }

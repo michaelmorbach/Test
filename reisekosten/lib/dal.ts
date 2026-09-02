@@ -7,7 +7,7 @@ import type { PublicUser } from '@/lib/types';
 export const getCurrentUser = cache(async (): Promise<PublicUser | null> => {
   const payload = await readSessionPayload();
   if (!payload) return null;
-  const user = findUserById(payload.userId);
+  const user = await findUserById(payload.userId);
   if (!user || !user.active) return null;
   return toPublicUser(user);
 });

@@ -22,7 +22,7 @@ import {
 export default async function TripDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  const trip = getTripWithDetails(id);
+  const trip = await getTripWithDetails(id);
   if (!trip) notFound();
 
   const isOwner = trip.employeeId === user.id;
@@ -33,7 +33,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
   const canReview = isApprover && trip.status === 'EINGEREICHT';
   const isMyReview = isApprover && trip.status === 'IN_PRUEFUNG' && trip.reviewerId === user.id;
   const status = statusConfig[trip.status];
-  const vehicleTypes = listVehicleTypes();
+  const vehicleTypes = await listVehicleTypes();
 
   return (
     <div className="min-h-full">
@@ -106,7 +106,7 @@ export default async function TripDetailPage({ params }: { params: Promise<{ id:
                     <div>
                       <span className="font-medium text-slate-700">{r.haendler}</span>
                       <span className="text-slate-400"> · {categoryLabels[r.kategorie]} · {paymentMethodLabels[r.zahlungsart]} · {formatDate(r.belegDatum)}</span>
-                      {r.dateiPfad && (
+                      {r.hatDatei && (
                         <>
                           {' · '}
                           <a
