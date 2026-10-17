@@ -21,7 +21,8 @@ Die App läuft dann unter `http://localhost:3000` (oder dem übergebenen Port, z
 1. **Postgres-Datenbank anlegen**: im Vercel-Projekt unter *Storage* → *Create Database* → Postgres (oder eine Neon-Integration verknüpfen). Vercel setzt daraufhin automatisch eine Verbindungs-Umgebungsvariable (i. d. R. `POSTGRES_URL`); die App erkennt sowohl `DATABASE_URL` als auch `POSTGRES_URL`/`POSTGRES_PRISMA_URL`.
 2. **Repo importieren**: `michaelmorbach/Test` als neues Vercel-Projekt importieren, dabei **Root Directory auf `reisekosten`** setzen (Next.js wird automatisch erkannt).
 3. **Umgebungsvariable `SESSION_SECRET`** im Projekt anlegen (z. B. via `openssl rand -base64 32`).
-4. Deployen – beim ersten Request legt die App ihr Schema in der verbundenen Postgres-Datenbank an.
+4. **Optional: `ANTHROPIC_API_KEY`** setzen, um „Beleg auslesen (KI)" im Beleg-Formular zu aktivieren (siehe Funktionsumfang unten). Ohne Key läuft die App normal, der Button zeigt nur einen Hinweis.
+5. Deployen – beim ersten Request legt die App ihr Schema in der verbundenen Postgres-Datenbank an.
 
 Beleg-Dateien werden direkt in der Datenbank gespeichert (nicht im Dateisystem), damit sie auf der zustandslosen Serverless-Plattform von Vercel zuverlässig erhalten bleiben.
 
@@ -40,7 +41,7 @@ Bitte in einer echten Umgebung nach dem ersten Login Passwörter ändern bzw. ei
 - **Rollen & Rechte**: jeder Account kann eigene Reisen erfassen; `isApprover` schaltet Freigaben frei, `isAdmin` zusätzlich Team- und Kilometersatz-Verwaltung.
 - **Statuspfad**: Entwurf → Eingereicht → In Prüfung → Freigegeben, mit Zurückgegeben als Rücksprung (Pflichtkommentar).
 - **Prüfprotokoll**: lückenlose Historie je Reise (angelegt, eingereicht, geprüft/freigegeben, Kommentare) unter „Prüfprotokoll" auf der Detailseite.
-- **Belege**: Kategorie, Händler, Betrag, Zahlungsart, optionaler Foto-/Scan-Upload (in der Datenbank gespeichert) mit geschütztem Download.
+- **Belege**: Kategorie, Händler, Betrag, Zahlungsart, optionaler Foto-/Scan-Upload (in der Datenbank gespeichert) mit geschütztem Download. Mit „Beleg auslesen (KI)" lassen sich Händler, Betrag, Datum und Kategorie automatisch aus Foto/Scan vorausfüllen (Claude Vision/OCR) – Vorschlag bleibt editierbar, muss aber geprüft werden. Erfordert `ANTHROPIC_API_KEY`.
 - **Kilometerabrechnung**: Start/Ziel/Datum/Anlass/Fahrzeugart/km; Satz wird bei Erfassung eingefroren (spätere Satzänderungen wirken nicht rückwirkend). Standardsätze: Privat-Pkw 0,30 €/km, Motorrad/Motorroller 0,20 €/km – unter **Kilometersätze** administrierbar.
 - **PDF-Export** je Reise unter „PDF" auf der Detailseite bzw. `/reisekosten/[id]/pdf`.
 

@@ -1,7 +1,7 @@
 'use client';
 
-import { useActionState, useTransition } from 'react';
-import { Trash2 } from 'lucide-react';
+import { useActionState, useEffect, useRef, useState, useTransition } from 'react';
+import { Sparkles, Trash2 } from 'lucide-react';
 import {
   addMileageEntryAction,
   addReceiptAction,
@@ -11,6 +11,7 @@ import {
   updateTripAction,
   type ActionState,
 } from '@/app/actions/trips';
+import { extractReceiptAction } from '@/app/actions/ocr';
 import { approveTripAction, returnTripAction, takeForReviewAction } from '@/app/actions/review';
 import type { VehicleType } from '@/lib/types';
 
@@ -51,12 +52,98 @@ export function AddReceiptForm({ tripId }: { tripId: string }) {
   const boundAction = addReceiptAction.bind(null, tripId);
   const [state, action, pending] = useActionState(boundAction, initialState);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [kategorie, setKategorie] = useState('FAHRT');
+  const [haendler, setHaendler] = useState('');
+  const [betrag, setBetrag] = useState('');
+  const [belegDatum, setBelegDatum] = useState('');
+  const [ocrPending, startOcrTransition] = useTransition();
+  const [ocrError, setOcrError] = useState<string | null>(null);
+  const [ocrApplied, setOcrApplied] = useState(false);
+
+  const wasPending = useRef(false);
+  useEffect(() => {
+    if (wasPending.current && !pending && !state?.error) {
+      setKategorie('FAHRT');
+      setHaendler('');
+      setBetrag('');
+      setBelegDatum('');
+      setOcrApplied(false);
+      setOcrError(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+    wasPending.current = pending;
+  }, [pending, state]);
+
+  function handleExtract() {
+    const file = fileInputRef.current?.files?.[0];
+    if (!file) {
+      setOcrError('Bitte zuerst eine Datei auswählen.');
+      return;
+    }
+    setOcrError(null);
+    setOcrApplied(false);
+    startOcrTransition(async () => {
+      const fd = new FormData();
+      fd.set('beleg', file);
+      const result = await extractReceiptAction(fd);
+      if (result.error) {
+        setOcrError(result.error);
+        return;
+      }
+      if (result.data) {
+        setKategorie(result.data.kategorie);
+        setHaendler(result.data.haendler);
+        setBetrag(result.data.betrag);
+        setBelegDatum(result.data.belegDatum);
+        setOcrApplied(true);
+      }
+    });
+  }
+
   return (
     <form action={action} className="space-y-3 bg-slate-50 rounded-lg p-4">
+      <div>
+        <label className="text-xs font-medium text-slate-500 block mb-1">Belegfoto/-scan (optional)</label>
+        <div className="flex items-center gap-2">
+          <input
+            type="file"
+            name="beleg"
+            ref={fileInputRef}
+            accept="image/*,application/pdf"
+            onChange={() => {
+              setOcrError(null);
+              setOcrApplied(false);
+            }}
+            className="flex-1 text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-200 file:text-slate-700 file:text-sm"
+          />
+          <button
+            type="button"
+            onClick={handleExtract}
+            disabled={ocrPending}
+            title="Felder automatisch aus dem Beleg auslesen (KI)"
+            className="shrink-0 flex items-center gap-1.5 text-sm font-medium bg-violet-100 hover:bg-violet-200 disabled:opacity-60 text-violet-700 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            <Sparkles size={14} />
+            {ocrPending ? 'Liest aus…' : 'Auslesen'}
+          </button>
+        </div>
+        {ocrError && <p className="text-xs text-red-600 mt-1">{ocrError}</p>}
+        {ocrApplied && (
+          <p className="text-xs text-emerald-700 mt-1">Von der KI vorausgefüllt – bitte Angaben prüfen.</p>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-xs font-medium text-slate-500 block mb-1">Kategorie</label>
-          <select name="kategorie" required className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <select
+            name="kategorie"
+            required
+            value={kategorie}
+            onChange={(e) => setKategorie(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+          >
             <option value="FAHRT">Fahrt</option>
             <option value="UEBERNACHTUNG">Übernachtung</option>
             <option value="VERPFLEGUNG">Verpflegung</option>
@@ -72,21 +159,26 @@ export function AddReceiptForm({ tripId }: { tripId: string }) {
           </select>
         </div>
       </div>
-      <FormField label="Händler" name="haendler" placeholder="z. B. Deutsche Bahn" required />
+      <FormField
+        label="Händler"
+        name="haendler"
+        placeholder="z. B. Deutsche Bahn"
+        required
+        value={haendler}
+        onChange={setHaendler}
+      />
       <div className="grid grid-cols-2 gap-3">
-        <FormField label="Betrag (€)" name="betrag" placeholder="12,50" required />
-        <FormField label="Belegdatum" name="belegDatum" type="date" required />
-      </div>
-      <FormField label="Notiz (optional)" name="notiz" />
-      <div>
-        <label className="text-xs font-medium text-slate-500 block mb-1">Belegfoto/-scan (optional)</label>
-        <input
-          type="file"
-          name="beleg"
-          accept="image/*,application/pdf"
-          className="w-full text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-200 file:text-slate-700 file:text-sm"
+        <FormField label="Betrag (€)" name="betrag" placeholder="12,50" required value={betrag} onChange={setBetrag} />
+        <FormField
+          label="Belegdatum"
+          name="belegDatum"
+          type="date"
+          required
+          value={belegDatum}
+          onChange={setBelegDatum}
         />
       </div>
+      <FormField label="Notiz (optional)" name="notiz" />
       {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
       <button
         type="submit"
@@ -252,6 +344,8 @@ function FormField({
   placeholder,
   required,
   defaultValue,
+  value,
+  onChange,
 }: {
   label: string;
   name: string;
@@ -259,7 +353,10 @@ function FormField({
   placeholder?: string;
   required?: boolean;
   defaultValue?: string;
+  value?: string;
+  onChange?: (value: string) => void;
 }) {
+  const controlled = value !== undefined && onChange !== undefined;
   return (
     <div>
       <label htmlFor={name} className="text-xs font-medium text-slate-500 block mb-1">
@@ -271,7 +368,9 @@ function FormField({
         type={type}
         placeholder={placeholder}
         required={required}
-        defaultValue={defaultValue}
+        {...(controlled
+          ? { value, onChange: (e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value) }
+          : { defaultValue })}
         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
       />
     </div>
